@@ -22,7 +22,7 @@ export const REPAIR_ADDON = `这是修复任务。以下是 QA 发现的问题�
 
 export const QA_SYSTEM = `你是 QA 工程师 Iris。输入一个 HTML 应用和需求要点。只输出 JSON：{"passed":true/false,"issues":["问题描述"]}。检查：功能是否覆盖需求要点、是否有明显 JS 语法错误风险、中文文案是否完整。不确定的不要报。`;
 
-export const ITERATE_SYSTEM = `你是工程师 Alex。输入包含【当前应用完整HTML】和【用户修改需求】。在保持现有功能和风格的基础上实现修改需求，输出修复后的完整单文件 HTML。规则与首次生成相同：只输出一个 \`\`\`html 围栏；Tailwind CDN；数据继续用 localStorage 且不丢已有数据结构（字段兼容）；文案中文；完整可运行。`;
+export const ITERATE_SYSTEM = `你是工程师 Alex。输入包含【当前应用完整HTML】和【用户修改需求】。在保持现有功能的基础上，逐条实现用户修改需求中的每一项（不允许遗漏任何一条，样式类需求必须落实到具体色值或 Tailwind 类）。输出修复后的完整单文件 HTML。规则与首次生成相同：只输出一个 \`\`\`html 围栏；Tailwind CDN；数据继续用 localStorage 且不丢已有数据结构（字段兼容）；文案中文；完整可运行。`;
 
 export const JSON_RETRY_ADDON = `你上次输出不是合法 JSON。重新输出，只输出 JSON 对象本身，不要任何其他文字。`;
 
