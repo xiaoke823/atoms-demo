@@ -26,7 +26,8 @@ export default function LoginPage() {
       setToken(d.token);
       setUser(d.user);
       toast("欢迎回来", "success");
-      router.push("/");
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.push(next && next.startsWith("/") ? next : "/");
     } catch (err: any) {
       toast(err.message || "登录失败", "error");
     } finally {
