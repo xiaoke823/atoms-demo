@@ -16,7 +16,7 @@ export const ENGINEER_SYSTEM = `你是工程师 Alex。基于给定的需求和�
 4. 数据持久化用 localStorage；所有交互即时反馈；无 alert，用行内提示或 toast
 5. 界面文案全部中文；不引用任何外链图片，视觉元素用 emoji、CSS、内联 SVG 实现；响应式
 6. 实现需求里的全部功能，代码完整可独立运行，不留 TODO
-7. 应用保持精简，总代码量控制在 500 行内`;
+7. 应用保持精简：HTML+CSS+JS 总计控制在 300 行以内，优先复用 Tailwind 类，少写自定义 CSS，不写冗余注释`;
 
 export const REPAIR_ADDON = `这是修复任务。以下是 QA 发现的问题清单，修复所有问题后输出完整 HTML（仍然只输出一个 \`\`\`html 围栏）：`;
 

@@ -23,7 +23,8 @@ function cfg() {
 async function postChat(
   messages: ChatMessage[],
   opts: LlmOpts,
-  stream: boolean
+  stream: boolean,
+  signal?: AbortSignal
 ): Promise<Response> {
   const { baseUrl, apiKey, model } = cfg();
   return fetch(`${baseUrl}/chat/completions`, {
@@ -39,7 +40,8 @@ async function postChat(
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? 16384,
     }),
-    signal: AbortSignal.timeout(opts.stream ? 300_000 : 120_000),
+    // 流式由调用方的空闲看门狗控制；非流式 120s 总超时
+    signal: stream ? signal : AbortSignal.timeout(120_000),
   });
 }
 
@@ -92,43 +94,60 @@ export async function chatStream(
   onDelta: (text: string) => void,
   opts: LlmOpts = {}
 ): Promise<string> {
-  const res = await postChat(messages, opts, true);
-  if (!res.ok) throw new Error(await errorMessage(res));
-  if (!res.body) throw new Error("LLM 未返回流式响应体");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let full = "";
-
-  const handlePayload = (payload: string): boolean => {
-    if (payload === "[DONE]") return true;
-    try {
-      const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-      if (typeof delta === "string" && delta) {
-        full += delta;
-        onDelta(delta);
-      }
-    } catch {
-      // 忽略无法解析的行（如部分端点的注释/心跳）
-    }
-    return false;
+  // 空闲看门狗：120s 无数据才判超时；只要模型还在吐字就不中断
+  const controller = new AbortController();
+  let idle: ReturnType<typeof setTimeout> | null = null;
+  const feed = () => {
+    if (idle) clearTimeout(idle);
+    idle = setTimeout(
+      () => controller.abort(new Error("LLM 流式响应超时（120 秒无数据）")),
+      120_000
+    );
   };
+  feed();
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx);
-      buf = buf.slice(idx + 1);
-      const s = line.trim();
-      if (s.startsWith("data:") && handlePayload(s.slice(5).trim())) {
-        return full;
+  try {
+    const res = await postChat(messages, opts, true, controller.signal);
+    if (!res.ok) throw new Error(await errorMessage(res));
+    if (!res.body) throw new Error("LLM 未返回流式响应体");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let full = "";
+
+    const handlePayload = (payload: string): boolean => {
+      if (payload === "[DONE]") return true;
+      try {
+        const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      } catch {
+        // 忽略无法解析的行（如部分端点的注释/心跳）
+      }
+      return false;
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      feed();
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        const s = line.trim();
+        if (s.startsWith("data:") && handlePayload(s.slice(5).trim())) {
+          return full;
+        }
       }
     }
+    // 流结束仍未收到 [DONE]：返回已累积内容
+    return full;
+  } finally {
+    if (idle) clearTimeout(idle);
   }
-  // 流结束仍未收到 [DONE]：返回已累积内容
-  return full;
 }

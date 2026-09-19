@@ -43,3 +43,8 @@ next-env.d.ts
 # atomix runtime data
 /data/*
 !/data/.gitkeep
+
+# 本地测试产物
+sse*.txt
+tok.txt
+preview*.html
