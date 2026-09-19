@@ -1,12 +1,15 @@
 "use client";
 // 全局顶栏：/p/* 公开页隐藏
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "./Providers";
+import CreditsPanel from "./CreditsPanel";
 
 export default function Navbar() {
   const pathname = usePathname() || "";
   const { user, logout } = useAuth();
+  const [showCredits, setShowCredits] = useState(false);
   if (pathname.startsWith("/p/")) return null;
 
   return (
@@ -26,12 +29,16 @@ export default function Navbar() {
         <div className="flex-1" />
         {user ? (
           <div className="flex items-center gap-3 text-sm">
-            <span
-              className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 font-medium"
-              title="积分余额"
-            >
-              ⚡ {user.credits}
-            </span>
+            <div className="relative">
+              <button
+                onClick={() => setShowCredits((s) => !s)}
+                className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 font-medium hover:bg-amber-100"
+                title="积分余额（点击签到/流水）"
+              >
+                ⚡ {user.credits}
+              </button>
+              {showCredits && <CreditsPanel onClose={() => setShowCredits(false)} />}
+            </div>
             <span className="text-slate-500 hidden md:inline max-w-36 truncate">
               {user.email}
             </span>

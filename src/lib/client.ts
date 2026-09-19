@@ -16,10 +16,12 @@ export function setToken(token: string | null) {
 export class ApiError extends Error {
   code?: string;
   status: number;
-  constructor(message: string, status: number, code?: string) {
+  data?: any;
+  constructor(message: string, status: number, code?: string, data?: any) {
     super(message);
     this.status = status;
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -39,7 +41,7 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   } catch {}
   if (!res.ok) {
     if (res.status === 401) setToken(null); // 页面自行决定是否跳登录
-    throw new ApiError(data?.message || "请求失败", res.status, data?.code);
+    throw new ApiError(data?.message || "请求失败", res.status, data?.code, data);
   }
   return data as T;
 }

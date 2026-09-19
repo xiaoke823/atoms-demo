@@ -6,6 +6,7 @@ import { postSSE } from "@/lib/client";
 import { useTheater } from "@/lib/theater";
 import MessageCard, { UserBubble } from "@/components/MessageCard";
 import PreviewPane from "@/components/PreviewPane";
+import InsufficientModal from "@/components/InsufficientModal";
 import { useAuth, useToast } from "@/components/Providers";
 
 export default function WorkspaceNew() {
@@ -15,6 +16,7 @@ export default function WorkspaceNew() {
   const { state, feed, pushUser } = useTheater();
   const started = useRef(false);
   const [idea, setIdea] = useState<string | null>(null);
+  const [insufficient, setInsufficient] = useState(false);
 
   // 登录守卫 + 读取想法
   useEffect(() => {
@@ -43,7 +45,10 @@ export default function WorkspaceNew() {
         refresh(); // 刷新顶栏积分
         setTimeout(() => router.replace(`/workspace/${ev.projectId}`), 1200);
       }
-      if (ev.type === "error") toast(ev.message, "error");
+      if (ev.type === "error") {
+        if (ev.code === "INSUFFICIENT_CREDITS") setInsufficient(true);
+        else toast(ev.message, "error");
+      }
     }).catch((e) => {
       toast(`连接中断：${e?.message || e}`, "error");
     });
@@ -101,6 +106,10 @@ export default function WorkspaceNew() {
           running={state.phase === "running"}
         />
       </section>
+
+      {insufficient && (
+        <InsufficientModal onClose={() => setInsufficient(false)} onCheckin={refresh} />
+      )}
     </main>
   );
 }

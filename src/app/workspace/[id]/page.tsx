@@ -7,6 +7,7 @@ import { useTheater } from "@/lib/theater";
 import type { MessageDTO, ProjectDTO } from "@/lib/types";
 import MessageCard, { UserBubble } from "@/components/MessageCard";
 import PreviewPane from "@/components/PreviewPane";
+import InsufficientModal from "@/components/InsufficientModal";
 import { useAuth, useToast } from "@/components/Providers";
 
 export default function Workspace() {
@@ -21,6 +22,7 @@ export default function Workspace() {
   const [busy, setBusy] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const [insufficient, setInsufficient] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 登录守卫
@@ -66,7 +68,10 @@ export default function Workspace() {
       await postSSE(`/api/projects/${params.id}/chat`, { message: text }, (ev) => {
         feed(ev);
         if (ev.type === "done") refresh();
-        if (ev.type === "error") toast(ev.message, "error");
+        if (ev.type === "error") {
+          if (ev.code === "INSUFFICIENT_CREDITS") setInsufficient(true);
+          else toast(ev.message, "error");
+        }
       });
     } catch (err: any) {
       toast(`连接中断：${err?.message || err}`, "error");
@@ -194,6 +199,10 @@ export default function Workspace() {
           onUnpublish={doUnpublish}
         />
       </section>
+
+      {insufficient && (
+        <InsufficientModal onClose={() => setInsufficient(false)} onCheckin={refresh} />
+      )}
 
       {/* 发布链接弹层 */}
       {showLink && project?.slug && (
