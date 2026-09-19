@@ -38,10 +38,7 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
     data = await res.json();
   } catch {}
   if (!res.ok) {
-    if (res.status === 401) {
-      setToken(null);
-      if (typeof window !== "undefined") window.location.href = "/login";
-    }
+    if (res.status === 401) setToken(null); // 页面自行决定是否跳登录
     throw new ApiError(data?.message || "请求失败", res.status, data?.code);
   }
   return data as T;
@@ -73,10 +70,7 @@ export async function postSSE(
     try {
       data = await res.json();
     } catch {}
-    if (res.status === 401) {
-      setToken(null);
-      if (typeof window !== "undefined") window.location.href = "/login";
-    }
+    if (res.status === 401) setToken(null);
     onEvent({
       type: "error",
       message: data?.message || `请求失败（${res.status}）`,
