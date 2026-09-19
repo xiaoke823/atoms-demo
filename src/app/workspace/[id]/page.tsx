@@ -19,6 +19,8 @@ export default function Workspace() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing">("loading");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [showLink, setShowLink] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 登录守卫
@@ -72,6 +74,47 @@ export default function Workspace() {
       setBusy(false);
     }
   };
+
+  const doPublish = async () => {
+    if (publishing || !project) return;
+    setPublishing(true);
+    try {
+      const d = await api<{ ok: boolean; slug: string | null }>(
+        `/api/projects/${params.id}/publish`,
+        { method: "POST", body: JSON.stringify({ action: "publish" }) }
+      );
+      if (d.slug) {
+        setProject((p) => (p ? { ...p, status: "published", slug: d.slug } : p));
+        setShowLink(true);
+        toast("发布成功，奖励 5 积分 ⚡", "success");
+        refresh();
+      }
+    } catch (e: any) {
+      toast(e.message || "发布失败", "error");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const doUnpublish = async () => {
+    if (!project) return;
+    try {
+      await api(`/api/projects/${params.id}/publish`, {
+        method: "POST",
+        body: JSON.stringify({ action: "unpublish" }),
+      });
+      setProject((p) => (p ? { ...p, status: "draft", slug: null } : p));
+      setShowLink(false);
+      toast("已取消发布");
+    } catch (e: any) {
+      toast(e.message || "操作失败", "error");
+    }
+  };
+
+  const publicUrl =
+    project?.slug && typeof window !== "undefined"
+      ? `${window.location.origin}/p/${project.slug}`
+      : "";
 
   if (loadState === "loading")
     return <main className="flex-1 flex items-center justify-center text-slate-400">加载中…</main>;
@@ -144,8 +187,63 @@ export default function Workspace() {
           codeText={state.codeText}
           html={state.previewHtml}
           running={state.phase === "running"}
+          publishState={
+            project?.html ? (project.status === "published" ? "published" : "enabled") : "hidden"
+          }
+          onPublish={doPublish}
+          onUnpublish={doUnpublish}
         />
       </section>
+
+      {/* 发布链接弹层 */}
+      {showLink && project?.slug && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"
+          onClick={() => setShowLink(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-slate-900">🌐 发布成功</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              任何人都可以通过下面的链接访问你的应用（无需登录）
+            </p>
+            <div className="mt-4 flex gap-2">
+              <input
+                readOnly
+                value={publicUrl}
+                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-600"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(publicUrl);
+                  toast("链接已复制", "success");
+                }}
+                className="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700"
+              >
+                复制
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <a
+                href={publicUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                访问
+              </a>
+              <button
+                onClick={() => setShowLink(false)}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500"
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
