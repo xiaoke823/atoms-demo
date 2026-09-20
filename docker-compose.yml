@@ -5,7 +5,7 @@ services:
     container_name: atomix
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     env_file: .env.production
     environment:
       # SQLite 落在卷内，容器重建数据不丢
