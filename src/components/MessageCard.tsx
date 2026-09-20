@@ -116,6 +116,8 @@ function ArtifactView({ agent, artifact }: { agent: string; artifact: any }) {
 }
 
 export default function MessageCard({ card }: { card: TheaterCard }) {
+  // user 卡片由页面渲染为气泡，不应进入此处
+  if (card.agent === "user") return null;
   const meta = ROLE_META[card.agent];
   const running = card.status === "running";
   return (
@@ -155,8 +157,21 @@ export default function MessageCard({ card }: { card: TheaterCard }) {
           </div>
         )}
 
-        {/* 工程师生成中的字数反馈 */}
-        {card.agent === "engineer" && running && !card.note && (
+        {/* PM/架构师思考中的字数反馈（原始 JSON 不展示，只报进度） */}
+        {(card.agent === "pm" || card.agent === "architect") && running && card.chars > 0 && (
+          <div className="mt-1.5 text-sm text-slate-500">
+            正在思考 · 已输出 {card.chars.toLocaleString()} 字
+          </div>
+        )}
+
+        {/* 工程师生成中的反馈：首字到达前的思考期（推理模型可能长达 1-2 分钟） */}
+        {card.agent === "engineer" && running && !card.note && card.chars === 0 && (
+          <div className="mt-1.5 text-sm text-slate-500">
+            正在构思方案 · 模型思考中，约 1-2 分钟后开始输出代码
+            <span className="inline-block w-1.5 h-3.5 bg-emerald-400 ml-1 animate-pulse align-middle" />
+          </div>
+        )}
+        {card.agent === "engineer" && running && !card.note && card.chars > 0 && (
           <div className="mt-1.5 text-sm text-slate-500">
             正在编写代码 · 已生成 {card.chars.toLocaleString()} 字符
             <span className="inline-block w-1.5 h-3.5 bg-emerald-400 ml-1 animate-pulse align-middle" />

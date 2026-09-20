@@ -19,8 +19,11 @@ export default function WorkspaceNew() {
   const [insufficient, setInsufficient] = useState(false);
 
   // 登录守卫 + 读取想法
+  // consumed：守卫必须幂等——消费 sessionStorage 后，auth 刷新带来的 user
+  // 引用变化会重跑本 effect，若不拦下会因取不到想法而误跳回首页。
+  const consumed = useRef(false);
   useEffect(() => {
-    if (loading) return;
+    if (loading || consumed.current) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -30,6 +33,7 @@ export default function WorkspaceNew() {
       router.replace("/");
       return;
     }
+    consumed.current = true;
     setIdea(stored);
     sessionStorage.removeItem("atomix_idea");
   }, [loading, user, router]);
@@ -71,12 +75,13 @@ export default function WorkspaceNew() {
       {/* 左：团队对话 */}
       <section className="flex-1 min-w-0 flex flex-col gap-4">
         <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-          {state.userLines.map((t, i) => (
-            <UserBubble key={`u${i}`} text={t} />
-          ))}
-          {state.cards.map((c) => (
-            <MessageCard key={c.key} card={c} />
-          ))}
+          {state.cards.map((c) =>
+            c.agent === "user" ? (
+              <UserBubble key={c.key} text={c.text || ""} />
+            ) : (
+              <MessageCard key={c.key} card={c} />
+            )
+          )}
           {state.phase === "error" && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
               {state.errorMessage}

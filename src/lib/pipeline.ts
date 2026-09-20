@@ -26,8 +26,8 @@ const RUNNING_TEXT: Record<Agent, string> = {
   qa: "正在质检…",
 };
 
-/** 调 LLM 并解析 JSON（流式转发打字效果；带一次重试 + 降级为纯文本） */
-async function callJson(
+/** 调 LLM 并解析 JSON（原始流转发供前端计数；带一次重试 + 降级为纯文本） */
+export async function callJson(
   system: string,
   messages: ChatMessage[],
   send: Send,
@@ -40,7 +40,7 @@ async function callJson(
   );
   let j = extractJson(first);
   if (j.ok) return { data: j.data, text: first };
-  send({ type: "delta", agent, text: "（输出格式异常，重试解析…）" });
+  send({ type: "delta", agent, text: "（输出格式异常，重试解析…）", status: true });
   const second = await chatStream(
     [
       { role: "system", content: system },
@@ -89,15 +89,15 @@ export async function runGeneration(
 ): Promise<GenerationResult> {
   // ── 阶段 1 · PM ────────────────────────────────────────────
   send({ type: "stage_start", agent: "pm" });
-  send({ type: "delta", agent: "pm", text: RUNNING_TEXT.pm });
+  send({ type: "delta", agent: "pm", text: RUNNING_TEXT.pm, status: true });
   const pm = await callJson(P.PM_SYSTEM, P.pmUser(idea), send, "pm");
   const pmData = sanitizePm(pm.data, idea);
-  send({ type: "delta", agent: "pm", text: `应用定位：${pmData.name} —— ${pmData.tagline}` });
+  send({ type: "delta", agent: "pm", text: `应用定位：${pmData.name} —— ${pmData.tagline}`, status: true });
   send({ type: "stage_done", agent: "pm", artifact: pmData });
 
   // ── 阶段 2 · 架构师 ────────────────────────────────────────
   send({ type: "stage_start", agent: "architect" });
-  send({ type: "delta", agent: "architect", text: RUNNING_TEXT.architect });
+  send({ type: "delta", agent: "architect", text: RUNNING_TEXT.architect, status: true });
   const arch = await callJson(
     P.ARCHITECT_SYSTEM,
     P.architectUser(pm.data ?? pmData),
@@ -105,7 +105,7 @@ export async function runGeneration(
     "architect"
   );
   const archData = arch.data ?? { layout: [], modules: [], palette: {}, interactions: [] };
-  send({ type: "delta", agent: "architect", text: "技术方案已确定，交给工程师实现。" });
+  send({ type: "delta", agent: "architect", text: "技术方案已确定，交给工程师实现。", status: true });
   send({ type: "stage_done", agent: "architect", artifact: archData });
 
   // ── 阶段 3 · 工程师（流式） ─────────────────────────────────
@@ -124,7 +124,7 @@ export async function runGeneration(
   const issues = runRuleChecks(html);
   let passed = issues.length === 0;
   if (passed) {
-    send({ type: "delta", agent: "qa", text: "静态规则通过，进行语义审查…" });
+    send({ type: "delta", agent: "qa", text: "静态规则通过，进行语义审查…", status: true });
     const qaText = await chat(
       [{ role: "system", content: P.QA_SYSTEM }, ...P.qaUser(idea, pmData.features, html)],
       { temperature: 0, maxTokens: 2048 }
@@ -145,7 +145,7 @@ export async function runGeneration(
   let repaired = false;
   if (!passed) {
     send({ type: "stage_start", agent: "engineer", note: "repair" });
-    send({ type: "delta", agent: "engineer", text: `QA 发现 ${issues.length} 个问题，正在修复…` });
+    send({ type: "delta", agent: "engineer", text: `QA 发现 ${issues.length} 个问题，正在修复…`, status: true });
     try {
       const fixRaw = await chatStream(
         [{ role: "system", content: P.ENGINEER_SYSTEM }, ...P.repairUser(issues, html)],

@@ -4,7 +4,9 @@ export type Agent = "pm" | "architect" | "engineer" | "qa";
 
 export type SSEEvent =
   | { type: "stage_start"; agent: Agent; note?: string }
-  | { type: "delta"; agent: Agent; text: string }
+  // status:true = 人工提示行（前端展示）；缺省 = 模型原始输出（前端只计数，
+  // 避免把 PM/架构师的 JSON、工程师的 HTML 原文铺进对话流）
+  | { type: "delta"; agent: Agent; text: string; status?: boolean }
   | { type: "preview"; html: string }
   | { type: "stage_done"; agent: Agent; artifact?: unknown }
   | { type: "done"; projectId: number; credits: number }

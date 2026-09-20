@@ -55,7 +55,7 @@ export default function Workspace() {
   // 自动滚到最新
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [state.cards.length, state.userLines.length]);
+  }, [state.cards.length]);
 
   const iterate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,12 +147,13 @@ export default function Workspace() {
         )}
 
         <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-          {state.userLines.map((t, i) => (
-            <UserBubble key={`u${i}`} text={t} />
-          ))}
-          {state.cards.map((c) => (
-            <MessageCard key={c.key} card={c} />
-          ))}
+          {state.cards.map((c) =>
+            c.agent === "user" ? (
+              <UserBubble key={c.key} text={c.text || ""} />
+            ) : (
+              <MessageCard key={c.key} card={c} />
+            )
+          )}
           {state.phase === "error" && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
               {state.errorMessage}
