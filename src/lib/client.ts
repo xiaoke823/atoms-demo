@@ -88,6 +88,8 @@ export async function postSSE(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
+  // 是否收到过终止事件（done / error）。服务端正常收尾必然发送其一。
+  let terminal = false;
 
   const handleFrame = (frame: string) => {
     // frame 形如 "event: message\ndata: {...}"；注释行（: ping）忽略
@@ -95,7 +97,9 @@ export async function postSSE(
       const s = line.trim();
       if (!s.startsWith("data:")) continue;
       try {
-        onEvent(JSON.parse(s.slice(5).trim()));
+        const ev = JSON.parse(s.slice(5).trim());
+        if (ev?.type === "done" || ev?.type === "error") terminal = true;
+        onEvent(ev);
       } catch {}
     }
   };
@@ -110,5 +114,11 @@ export async function postSSE(
       buf = buf.slice(idx + 2);
       handleFrame(frame);
     }
+  }
+
+  // 流关闭但从未收到终止事件：服务端进程死亡 / 连接被掐断。
+  // 合成 error 让页面显示失败提示，而不是永远停在"生成中"。
+  if (!terminal) {
+    onEvent({ type: "error", message: "连接中断，未收到生成结果，请重试" });
   }
 }

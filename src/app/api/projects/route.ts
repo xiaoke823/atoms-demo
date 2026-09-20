@@ -4,7 +4,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { getDb, deductCredits, grantCredits } from "@/lib/db";
 import { runGeneration } from "@/lib/pipeline";
 import { sseFrame, SSE_PING } from "@/lib/sse";
-import { checkRate } from "@/lib/ratelimit";
+import { checkRate, clearRate } from "@/lib/ratelimit";
 import type { SSEEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -70,8 +70,9 @@ export async function POST(req: Request) {
 
       runGeneration(user.id, prompt, send)
         .catch((e) => {
-          // 生成失败：全额退分 + error 事件
+          // 生成失败：全额退分 + error 事件；同时释放限流窗口允许立即重试
           grantCredits(db, user.id, 10, "refund");
+          clearRate(`gen:${user.id}`);
           send({
             type: "error",
             message:

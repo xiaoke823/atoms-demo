@@ -15,3 +15,8 @@ export function sweepRate(maxAgeSeconds = 3600) {
   const now = Date.now();
   for (const [k, t] of last) if (now - t > maxAgeSeconds * 1000) last.delete(k);
 }
+
+/** 清除某 key 的限流记录（生成失败时释放窗口，允许用户立即重试） */
+export function clearRate(key: string) {
+  last.delete(key);
+}

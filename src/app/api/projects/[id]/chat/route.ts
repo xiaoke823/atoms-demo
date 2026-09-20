@@ -6,7 +6,7 @@ import * as P from "@/lib/prompts";
 import { extractHtml } from "@/lib/extract";
 import { runRuleChecks } from "@/lib/qa";
 import { sseFrame, SSE_PING } from "@/lib/sse";
-import { checkRate } from "@/lib/ratelimit";
+import { checkRate, clearRate } from "@/lib/ratelimit";
 import type { SSEEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -101,6 +101,7 @@ export async function POST(
               type: "delta",
               agent: "qa",
               text: `规则检查发现 ${issues.length} 个问题，打回修复…`,
+              status: true,
             });
             try {
               const fixRaw = await chatStream(
@@ -141,8 +142,9 @@ export async function POST(
           ).credits;
           send({ type: "done", projectId: pid, credits });
         } catch (e) {
-          // 失败：退回积分
+          // 失败：退回积分；释放限流窗口允许立即重试
           grantCredits(db, user.id, 2, "refund");
+          clearRate(`iter:${user.id}`);
           send({
             type: "error",
             message:
