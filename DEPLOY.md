@@ -15,6 +15,19 @@ curl -fsSL https://get.docker.com | sh
 sudo systemctl enable --now docker
 ```
 
+### 1.5 国内服务器必做：镜像加速
+
+国内服务器直连 Docker Hub / Debian / npm 官方源极慢（构建可卡 30 分钟以上）。Dockerfile 内已内置 Debian 与 npm 的国内源替换；还需给 Docker 配置镜像拉取加速（用阿里云免费的[容器镜像服务加速地址](https://cr.console.aliyun.com/cn-hangzhou/instances/mirrors)，登录后在"镜像加速器"页拿到专属地址）：
+
+```bash
+sudo tee /etc/docker/daemon.json <<'EOF'
+{ "registry-mirrors": ["https://<你的加速地址>.mirror.aliyuncs.com"] }
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart docker
+```
+
+> 若已有其他可用的镜像加速地址（网易/中科大等），填进去即可，不局限于阿里云。
+
 ## 2. 获取代码
 
 ```bash
@@ -112,6 +125,7 @@ docker exec atomix node -e "console.log(process.env.AUTH_SECRET ? 'SET' : 'MISSI
 
 | 症状 | 原因 |
 |---|---|
+| `docker compose build` 长时间卡在 apt/npm 步骤 | 国内访问境外源极慢：确认用的是本仓库 Dockerfile（已内置国内源）；并按 §1.5 配置镜像加速 |
 | 生成卡在"构思方案"后失败 | 服务器出不了网，调不通 LLM API；`docker exec atomix node -e "fetch(process.env.LLM_BASE_URL+'/models').then(r=>console.log(r.status)).catch(e=>console.log('FAIL',e.message))"` |
 | 页面能开但登录就 401 | `.env.production` 未配置或改后未 `docker compose up -d` 重建 |
 | 走 Nginx 后生成几分钟必断 | Nginx 缺 SSE 配置（`proxy_buffering off` / `proxy_read_timeout`） |
