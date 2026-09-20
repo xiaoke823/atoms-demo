@@ -1,0 +1,35 @@
+services:
+  web:
+    build: .
+    image: atomix
+    container_name: atomix
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env.production
+    environment:
+      # SQLite 落在卷内，容器重建数据不丢
+      ATOMIX_DB_PATH: /app/data/atomix.db
+    volumes:
+      - atomix-data:/app/data
+    healthcheck:
+      # 镜像无 curl/wget，用 node 自带 fetch 探活
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  atomix-data:
