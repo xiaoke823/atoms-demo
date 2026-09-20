@@ -10,9 +10,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  // suppressHydrationWarning: 浏览器插件(如 Trancy、沉浸式翻译)会在水合前往 <html>/<body> 注入属性
   return (
-    <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
+    <html lang="zh-CN" className="h-full antialiased" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900" suppressHydrationWarning>
         <Providers>
           <Navbar />
           {children}
