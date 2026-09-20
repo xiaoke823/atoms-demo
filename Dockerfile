@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Atomix 生产镜像：多阶段构建，最终镜像只含 standalone 产物
 # better-sqlite3 为原生模块：deps 阶段带编译链（prebuild 下载失败时兜底源码编译），
 # runner 与 builder 同为 linux glibc（bookworm），二进制兼容。
