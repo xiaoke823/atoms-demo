@@ -49,8 +49,31 @@ vim .env.production         # 填 AUTH_SECRET 和 LLM_API_KEY
 
 ## 4. 构建并启动
 
+**方式 A · 服务器构建**(内存 ≥ 4G 时可用;2G 小内存机器可能被 `next build` 拖到假死):
+
 ```bash
 docker compose up -d --build
+```
+
+**方式 B · 本地构建 + 传输**(推荐,小内存服务器必走;国内网络注意事项见下):
+
+```bash
+# 本地(需 Docker Desktop;先手动拉基础镜像,构建前序层):
+docker pull node:22-bookworm-slim          # BuildKit 不走 daemon mirror,需预拉
+docker build -t atomix:latest .            # Dockerfile 已内置 npmmirror + 强制源码编译
+docker save atomix:latest | gzip > atomix-image.tar.gz
+scp atomix-image.tar.gz <user>@<服务器>:/opt/apps/atoms-demo/
+
+# 服务器:
+docker load < atomix-image.tar.gz
+docker compose up -d                        # 不带 --build,直接用加载的镜像
+```
+
+> 国内网络三个坑(均已在本仓库处理):BuildKit 直连 docker.io 拉不动 → 预拉基础镜像 + 移除 syntax 指令;better-sqlite3 预编译包从 GitHub 下载会挂 20 分钟+ → `npm_config_build_from_source=true` 强制源码编译;apt 换源在非阿里云网络可能反而连不上 → 保持官方源。
+
+验证:
+
+```bash
 docker compose ps                      # 应显示 healthy（约 30 秒后）
 curl http://localhost:3000/api/health  # {"ok":true}
 ```

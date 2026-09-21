@@ -6,14 +6,13 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-# 国内服务器直连 Debian/npm 官方源极慢（实测可卡 30 分钟+），换国内镜像；
-# 海外部署可删除本 RUN 中的 sed 与 --registry 部分。
-RUN { sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
-      || sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; } \
-    && apt-get update -qq \
+# - registry 用 npmmirror（国内明显快于官方）
+# - build_from_source：强制 better-sqlite3 源码编译，跳过 prebuild-install
+#   的 GitHub 下载（无超时机制，CN 网络下可挂 20 分钟+）
+RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/* \
-    && npm ci --registry=https://registry.npmmirror.com
+    && npm_config_build_from_source=true npm ci --registry=https://registry.npmmirror.com
 
 # ── 构建阶段 ──
 FROM node:22-bookworm-slim AS builder
