@@ -8,6 +8,8 @@ export interface ChatMessage {
 interface LlmOpts {
   temperature?: number;
   maxTokens?: number;
+  /** 整次调用(含重试)的总时限,毫秒。到期 abort 并抛错,杜绝无限挂起 */
+  deadlineMs?: number;
 }
 
 function cfg() {
@@ -40,8 +42,8 @@ async function postChat(
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? 16384,
     }),
-    // 流式由调用方的空闲看门狗控制；非流式 120s 总超时
-    signal: stream ? signal : AbortSignal.timeout(120_000),
+    // 流式由调用方的空闲看门狗控制；非流式默认 120s 总超时(调用方可传更短的 deadline)
+    signal: stream ? signal : (signal ?? AbortSignal.timeout(120_000)),
   });
 }
 
@@ -85,11 +87,34 @@ export async function chat(
   messages: ChatMessage[],
   opts: LlmOpts = {}
 ): Promise<string> {
+  const t0 = Date.now();
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0 && isTransient(lastErr)) await sleep(BACKOFF_MS[attempt - 1]);
+    // deadlineMs 是整次调用(含重试)的总预算,耗尽即失败,不再发起下一次尝试
+    if (opts.deadlineMs) {
+      const left = opts.deadlineMs - (Date.now() - t0);
+      if (left <= 0) {
+        throw new Error(`LLM 调用超时（${opts.deadlineMs / 1000 | 0} 秒总预算已耗尽）`);
+      }
+    }
     try {
-      const res = await postChat(messages, opts, false);
+      // 单次请求超时 = min(默认 120s, deadline 剩余)。用显式定时器(而非
+      // AbortSignal.timeout)保证行为可控可测
+      const left = opts.deadlineMs
+        ? Math.max(1, opts.deadlineMs - (Date.now() - t0))
+        : 120_000;
+      const ac = new AbortController();
+      const timer = setTimeout(
+        () => ac.abort(new Error(`LLM 请求超时（${Math.round(left / 1000)} 秒）`)),
+        left
+      );
+      let res: Response;
+      try {
+        res = await postChat(messages, opts, false, ac.signal);
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) throw new LlmHttpError(await errorMessage(res), res.status);
       const data = await res.json();
       const text = extractContent(data);
@@ -118,95 +143,119 @@ export async function chatStream(
   const HEADER_TIMEOUT_MS = 300_000;
   const IDLE_TIMEOUT_MS = 120_000;
 
-  for (let attempt = 0; ; attempt++) {
-    const controller = new AbortController();
-
-    // ── 阶段一：请求 → 响应头（模型可能在此思考数分钟）──
-    let res: Response;
-    try {
-      const headerTimer = setTimeout(
+  // deadline 与重试共用同一个 signal:总预算耗尽后所有尝试立即失败。
+  // 用显式 setTimeout（而非 AbortSignal.timeout）:走全局计时器,行为可控可测。
+  const deadlineAc = opts.deadlineMs ? new AbortController() : null;
+  const deadlineTimer = opts.deadlineMs
+    ? setTimeout(
         () =>
-          controller.abort(
-            new Error("LLM 响应超时（300 秒未返回，模型思考过久或服务异常）")
+          deadlineAc!.abort(
+            new Error(
+              `LLM 调用超时（${Math.round(opts.deadlineMs! / 1000)} 秒总预算）`
+            )
           ),
-        HEADER_TIMEOUT_MS
-      );
+        opts.deadlineMs
+      )
+    : null;
+
+  try {
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+
+      // ── 阶段一：请求 → 响应头（模型可能在此思考数分钟）──
+      let res: Response;
       try {
-        res = await postChat(messages, opts, true, controller.signal);
-      } finally {
-        clearTimeout(headerTimer);
-      }
-    } catch (e) {
-      // 连接没建立或头未到达：无副作用，可安全重试
-      if (attempt < BACKOFF_MS.length) {
-        await sleep(BACKOFF_MS[attempt]);
-        continue;
-      }
-      throw e;
-    }
-
-    // ── 阶段二：响应头 → 数据流。空闲看门狗：120s 无字节才判连接死；
-    // 头到达即武装，覆盖"头 → 首字节"间隙。
-    let idle: ReturnType<typeof setTimeout> | null = null;
-    const feed = () => {
-      if (idle) clearTimeout(idle);
-      idle = setTimeout(
-        () =>
-          controller.abort(new Error("LLM 流式响应超时（120 秒无数据）")),
-        IDLE_TIMEOUT_MS
-      );
-    };
-    feed();
-
-    try {
-      if (!res.ok) {
-        const msg = await errorMessage(res);
-        if (isTransient(new LlmHttpError(msg, res.status)) && attempt < BACKOFF_MS.length) {
+        const headerTimer = setTimeout(
+          () =>
+            controller.abort(
+              new Error("LLM 响应超时（300 秒未返回，模型思考过久或服务异常）")
+            ),
+          HEADER_TIMEOUT_MS
+        );
+        const reqSignal = deadlineAc
+          ? AbortSignal.any([controller.signal, deadlineAc.signal])
+          : controller.signal;
+        try {
+          res = await postChat(messages, opts, true, reqSignal);
+        } finally {
+          clearTimeout(headerTimer);
+        }
+      } catch (e) {
+        // deadline 已耗尽:总预算语义,不再重试
+        if (deadlineAc?.signal.aborted) throw e;
+        // 连接没建立或头未到达：无副作用，可安全重试
+        if (attempt < BACKOFF_MS.length) {
           await sleep(BACKOFF_MS[attempt]);
           continue;
         }
-        throw new Error(msg);
+        throw e;
       }
-      if (!res.body) throw new Error("LLM 未返回流式响应体");
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let full = "";
-
-      const handlePayload = (payload: string): boolean => {
-        if (payload === "[DONE]") return true;
-        try {
-          const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-          if (typeof delta === "string" && delta) {
-            full += delta;
-            onDelta(delta);
-          }
-        } catch {
-          // 忽略无法解析的行（如部分端点的注释/心跳）
-        }
-        return false;
+      // ── 阶段二：响应头 → 数据流。空闲看门狗：120s 无字节才判连接死；
+      // 头到达即武装，覆盖"头 → 首字节"间隙。
+      let idle: ReturnType<typeof setTimeout> | null = null;
+      const feed = () => {
+        if (idle) clearTimeout(idle);
+        idle = setTimeout(
+          () =>
+            controller.abort(new Error("LLM 流式响应超时（120 秒无数据）")),
+          IDLE_TIMEOUT_MS
+        );
       };
+      feed();
 
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        feed();
-        buf += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          const s = line.trim();
-          if (s.startsWith("data:") && handlePayload(s.slice(5).trim())) {
-            return full;
+      try {
+        if (!res.ok) {
+          const msg = await errorMessage(res);
+          if (isTransient(new LlmHttpError(msg, res.status)) && attempt < BACKOFF_MS.length) {
+            await sleep(BACKOFF_MS[attempt]);
+            continue;
+          }
+          throw new Error(msg);
+        }
+        if (!res.body) throw new Error("LLM 未返回流式响应体");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let full = "";
+
+        const handlePayload = (payload: string): boolean => {
+          if (payload === "[DONE]") return true;
+          try {
+            const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta) {
+              full += delta;
+              onDelta(delta);
+            }
+          } catch {
+            // 忽略无法解析的行（如部分端点的注释/心跳）
+          }
+          return false;
+        };
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          feed();
+          buf += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, idx);
+            buf = buf.slice(idx + 1);
+            const s = line.trim();
+            if (s.startsWith("data:") && handlePayload(s.slice(5).trim())) {
+              return full;
+            }
           }
         }
+        // 流结束仍未收到 [DONE]：返回已累积内容
+        return full;
+      } finally {
+        if (idle) clearTimeout(idle);
       }
-      // 流结束仍未收到 [DONE]：返回已累积内容
-      return full;
-    } finally {
-      if (idle) clearTimeout(idle);
     }
+  } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer);
   }
 }

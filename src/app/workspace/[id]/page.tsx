@@ -57,6 +57,8 @@ export default function Workspace() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.cards.length]);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const iterate = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
@@ -64,6 +66,8 @@ export default function Workspace() {
     setBusy(true);
     setInput("");
     pushUser(text);
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       await postSSE(`/api/projects/${params.id}/chat`, { message: text }, (ev) => {
         feed(ev);
@@ -72,13 +76,23 @@ export default function Workspace() {
           if (ev.code === "INSUFFICIENT_CREDITS") setInsufficient(true);
           else toast(ev.message, "error");
         }
-      });
-    } catch (err: any) {
-      toast(`连接中断：${err?.message || err}`, "error");
+      }, ac.signal);
+    } catch (err) {
+      if (ac.signal.aborted) {
+        // 手动取消:不打断剧场,提示后恢复可交互(服务端不会落库)
+        feed({ type: "error", message: "已取消本次修改，上一版本不受影响" });
+        toast("已取消", "info");
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast(`连接中断：${msg}`, "error");
+      }
     } finally {
+      abortRef.current = null;
       setBusy(false);
     }
   };
+
+  const cancelIterate = () => abortRef.current?.abort();
 
   const doPublish = async () => {
     if (publishing || !project) return;
@@ -177,13 +191,23 @@ export default function Workspace() {
             }
             className="flex-1 px-4 py-3 rounded-xl border border-slate-300 bg-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
           />
-          <button
-            type="submit"
-            disabled={busy || state.phase === "running" || !input.trim() || !project?.html}
-            className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-500 disabled:opacity-50"
-          >
-            发送
-          </button>
+          {busy ? (
+            <button
+              type="button"
+              onClick={cancelIterate}
+              className="px-5 py-3 rounded-xl bg-slate-200 text-slate-700 font-medium hover:bg-slate-300"
+            >
+              取消
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={busy || state.phase === "running" || !input.trim() || !project?.html}
+              className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-500 disabled:opacity-50"
+            >
+              发送
+            </button>
+          )}
         </form>
       </section>
 

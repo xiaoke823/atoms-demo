@@ -1,10 +1,13 @@
-// POST /api/projects/:id/chat —— 聊天迭代（SSE 流式，完整重生成 HTML）
+// POST /api/projects/:id/chat —— 聊天迭代（patch 模式：局部 find/replace，不全量重生成）
+// 二轮验收修复：① 真增量(输出量小,不撞 max_tokens) ② QA 不过不落库(保留上一版)
+// ③ 120s 总时限 + 客户端取消时不落库
 import { getUserFromRequest } from "@/lib/auth";
 import { getDb, deductCredits, grantCredits } from "@/lib/db";
-import { chatStream } from "@/lib/llm";
+import { chat } from "@/lib/llm";
 import * as P from "@/lib/prompts";
-import { extractHtml } from "@/lib/extract";
+import { extractJson } from "@/lib/extract";
 import { runRuleChecks } from "@/lib/qa";
+import { applyPatch } from "@/lib/patch";
 import { sseFrame, SSE_PING } from "@/lib/sse";
 import { checkRate, clearRate } from "@/lib/ratelimit";
 import type { SSEEvent } from "@/lib/types";
@@ -74,77 +77,94 @@ export async function POST(
       }, 15000);
 
       (async () => {
+        let charged = true; // 本轮是否已扣分(决定失败路径要不要退)
         try {
-          // ── 工程师按修改需求完整重生成 ──
+          // ── 工程师:生成局部修改指令(patch),非流式、120s 总时限 ──
           send({ type: "stage_start", agent: "engineer", note: "iterate" });
-          const raw = await chatStream(
+          send({
+            type: "delta",
+            agent: "engineer",
+            text: "正在分析修改需求，生成修改指令…",
+            status: true,
+          });
+          const patchText = await chat(
             [
-              { role: "system", content: P.ITERATE_SYSTEM },
-              ...P.iterateUser(project.html as string, message),
+              { role: "system", content: P.ITERATE_PATCH_SYSTEM },
+              ...P.iteratePatchUser(project.html as string, message),
             ],
-            (d) => send({ type: "delta", agent: "engineer", text: d }),
-            { temperature: 0.4 }
+            { temperature: 0.2, maxTokens: 4096, deadlineMs: 120_000 }
           );
-          const html = extractHtml(raw);
-          if (!html) throw new Error("未能生成有效的修改版本");
-
-          send({ type: "preview", html });
-          send({ type: "stage_done", agent: "engineer", artifact: { size: html.length } });
-
-          // ── QA：规则复检，不过则修复一轮 ──
-          send({ type: "stage_start", agent: "qa" });
-          let finalHtml = html;
-          let issues = runRuleChecks(html);
-          let repaired = false;
-          if (issues.length) {
-            send({
-              type: "delta",
-              agent: "qa",
-              text: `规则检查发现 ${issues.length} 个问题，打回修复…`,
-              status: true,
-            });
-            try {
-              const fixRaw = await chatStream(
-                [
-                  { role: "system", content: P.ENGINEER_SYSTEM },
-                  ...P.repairUser(issues, html),
-                ],
-                () => {},
-                { temperature: 0.3 }
-              );
-              const fixed = extractHtml(fixRaw);
-              if (fixed) {
-                finalHtml = fixed;
-                repaired = true;
-                send({ type: "preview", html: finalHtml });
-              }
-            } catch {}
-            issues = runRuleChecks(finalHtml);
+          const j = extractJson(patchText);
+          const result = applyPatch(project.html as string, j.ok ? j.data : null);
+          if (!result.applied.length) {
+            throw new Error(
+              "未能生成可应用的修改：请把需求描述得更具体一些（指明要修改的按钮、文案或颜色等）"
+            );
           }
+          send({
+            type: "delta",
+            agent: "engineer",
+            text: `已应用 ${result.applied.length} 处修改${
+              result.skipped.length ? `（另有 ${result.skipped.length} 处未能精确匹配，已忽略）` : ""
+            }`,
+            status: true,
+          });
+
+          // ── QA：规则复检。不过 → 不落库、回滚预览到上一版 ──
+          send({ type: "stage_start", agent: "qa" });
+          const issues = runRuleChecks(result.html);
           send({
             type: "stage_done",
             agent: "qa",
-            artifact: { passed: issues.length === 0, issues, repaired },
+            artifact: { passed: issues.length === 0, issues },
+          });
+          if (issues.length) {
+            // 回滚：库里本就是上一版(未写入)，把前端预览也刷回去
+            send({ type: "preview", html: project.html as string });
+            send({
+              type: "delta",
+              agent: "qa",
+              text: "质检未通过，已回滚到上一版本",
+              status: true,
+            });
+            throw new Error(
+              `修改未通过质检（${issues.length} 个问题），已保留上一版本`
+            );
+          }
+
+          // 用户已取消：不再落库(此前推送的内容仅停留在其本地预览)
+          if (closed) return;
+
+          send({ type: "preview", html: result.html });
+          send({
+            type: "stage_done",
+            agent: "engineer",
+            artifact: { size: result.html.length },
           });
 
           // ── 落库 ──
           db.prepare(
             "UPDATE projects SET html = ?, updated_at = datetime('now') WHERE id = ?"
-          ).run(finalHtml, pid);
+          ).run(result.html, pid);
           const ins = db.prepare(
             "INSERT INTO messages (project_id, role, content) VALUES (?, ?, ?)"
           );
           ins.run(pid, "user", message);
-          ins.run(pid, "engineer", finalHtml);
+          ins.run(pid, "engineer", result.html);
 
+          charged = false;
           const credits = (
-            db.prepare("SELECT credits FROM users WHERE id=?").get(user.id) as any
+            db.prepare("SELECT credits FROM users WHERE id=?").get(user.id) as {
+              credits: number;
+            }
           ).credits;
           send({ type: "done", projectId: pid, credits });
         } catch (e) {
           // 失败：退回积分；释放限流窗口允许立即重试
-          grantCredits(db, user.id, 2, "refund");
-          clearRate(`iter:${user.id}`);
+          if (charged) {
+            grantCredits(db, user.id, 2, "refund");
+            clearRate(`iter:${user.id}`);
+          }
           send({
             type: "error",
             message:

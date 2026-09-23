@@ -59,6 +59,30 @@ describe("chatStream", () => {
     expect(text).toBe("Hi");
   });
 
+  it("deadlineMs 到期中断挂起的流式请求", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_path: string, init?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted"))
+          );
+        });
+      })
+    );
+
+    const out = chatStream(
+      [{ role: "user", content: "hi" }],
+      () => {},
+      { deadlineMs: 100 }
+    ).catch((e: unknown) => e);
+    // 100ms deadline 触发 + 1s/2s 重试退避全部推进完
+    await vi.advanceTimersByTimeAsync(3500);
+    const err = await out;
+
+    expect(err).toBeInstanceOf(Error);
+  });
+
   it("响应头到达后 120s 无任何字节仍判超时", async () => {
     // 服务器回了头但流上永远没有数据（连接死）。
     // mock 需模拟真实 fetch 语义：abort 信号会让 body 流 error
@@ -141,6 +165,28 @@ describe("chatStream", () => {
 });
 
 describe("chat", () => {
+  it("deadlineMs 为总预算:挂起的请求在期限内被中断,不再重试", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_path: string, init?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted"))
+          );
+        });
+      })
+    );
+
+    const out = chat([{ role: "user", content: "hi" }], { deadlineMs: 100 }).catch(
+      (e: unknown) => e
+    );
+    await vi.advanceTimersByTimeAsync(150);
+    const err = await out;
+
+    expect(err).toBeInstanceOf(Error);
+    expect(fetch).toHaveBeenCalledTimes(1); // 总预算耗尽后不重试
+  });
+
   it("首次 429 后退避重试并成功", async () => {
     const fetchMock = vi
       .fn()

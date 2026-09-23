@@ -22,7 +22,17 @@ export const REPAIR_ADDON = `这是修复任务。以下是 QA 发现的问题�
 
 export const QA_SYSTEM = `你是 QA 工程师 Iris。输入一个 HTML 应用和需求要点。只输出 JSON：{"passed":true/false,"issues":["问题描述"]}。检查：功能是否覆盖需求要点、是否有明显 JS 语法错误风险、中文文案是否完整。不确定的不要报。`;
 
-export const ITERATE_SYSTEM = `你是工程师 Alex。输入包含【当前应用完整HTML】和【用户修改需求】。在保持现有功能的基础上，逐条实现用户修改需求中的每一项（不允许遗漏任何一条，样式类需求必须落实到具体色值或 Tailwind 类）。输出修复后的完整单文件 HTML。规则与首次生成相同：只输出一个 \`\`\`html 围栏；Tailwind CDN；数据继续用 localStorage 且不丢已有数据结构（字段兼容）；文案中文；完整可运行。`;
+export const ITERATE_PATCH_SYSTEM = `你是前端工程师。输入包含【当前应用完整HTML】和【用户修改需求】。
+你的任务不是重写整个文件,而是输出一组"查找替换"修改指令,只动需要改的部分。
+只输出一个 JSON 数组,每项形如:
+{"find":"当前HTML中要被替换的原文片段(必须从原文逐字复制,含足够上下文使其在全文中唯一)","replace":"替换后的新片段","reason":"一句话说明这次修改"}
+要求:
+1. find 必须与原文完全一致(空格、缩进、引号都要一致),并带足上下文确保全文唯一——只给一个空标签或一个单词会因不唯一而被拒绝
+2. 样式修改精确到具体 CSS 声明、Tailwind 类或 hex 色值;文案修改精确到完整标签
+3. 新增功能 = 找一个锚点(如某个容器的闭合标签),replace 为"锚点+新增代码"
+4. 不改动与需求无关的任何部分;最多 10 条
+5. 若需求无法通过局部替换实现(如推翻性重构),输出 {"fallback":true,"reason":"原因"}
+不要输出 JSON 以外的任何文字,不要 markdown 围栏。`;
 
 export const JSON_RETRY_ADDON = `你上次输出不是合法 JSON。重新输出，只输出 JSON 对象本身，不要任何其他文字。`;
 
@@ -74,11 +84,11 @@ export function qaUser(idea: string, features: string[], html: string): ChatMess
   ];
 }
 
-export function iterateUser(html: string, message: string): ChatMessage[] {
+export function iteratePatchUser(html: string, message: string): ChatMessage[] {
   return [
     {
       role: "user",
-      content: `【当前应用完整HTML】\n\`\`\`html\n${html}\n\`\`\`\n【用户修改需求】\n${message}`,
+      content: `【当前应用完整HTML】\n\`\`\`html\n${html}\n\`\`\`\n【用户修改需求】\n${message}\n\n请输出修改指令 JSON 数组。`,
     },
   ];
 }
