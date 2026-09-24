@@ -6,6 +6,7 @@ import type { ChatMessage } from "./llm";
 import * as P from "./prompts";
 import { extractJson, extractHtml } from "./extract";
 import { runRuleChecks } from "./qa";
+import { smokeTest } from "./smoke";
 import type { SSEEvent, Agent } from "./types";
 
 export type Send = (ev: SSEEvent) => void;
@@ -119,9 +120,15 @@ export async function runGeneration(
   if (!html) throw new Error("工程师输出中未找到有效 HTML，请重试");
   send({ type: "preview", html });
 
-  // ── 阶段 4 · QA（规则 + LLM 快审） ─────────────────────────
+  // ── 阶段 4 · QA（规则 + 冒烟 + LLM 快审） ───────────────────
   send({ type: "stage_start", agent: "qa" });
   const issues = runRuleChecks(html);
+  // 冒烟:真实执行一遍,运行时报错(交互失灵的主因)直接成为修复输入
+  send({ type: "delta", agent: "qa", text: "静态规则完成，运行冒烟测试…", status: true });
+  const smoke = await smokeTest(html);
+  if (!smoke.ok) {
+    issues.push(...smoke.errors.map((e) => `运行报错：${e}`));
+  }
   let passed = issues.length === 0;
   if (passed) {
     send({ type: "delta", agent: "qa", text: "静态规则通过，进行语义审查…", status: true });
@@ -162,6 +169,8 @@ export async function runGeneration(
       // 修复失败不致命：保留原版本继续交付
     }
     const recheck = runRuleChecks(finalHtml);
+    const resmoke = await smokeTest(finalHtml);
+    if (!resmoke.ok) recheck.push(...resmoke.errors.map((e) => `运行报错：${e}`));
     send({
       type: "stage_done",
       agent: "qa",

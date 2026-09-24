@@ -71,10 +71,10 @@ export default function WorkspaceNew() {
   }
 
   return (
-    <main className="flex-1 flex flex-col lg:flex-row gap-4 p-4 min-h-[calc(100vh-3.5rem)]">
+    <main className="flex-1 flex flex-col lg:flex-row gap-4 p-4 min-h-[calc(100vh-3.5rem)] lg:h-[calc(100vh-3.5rem)] lg:min-h-0">
       {/* 左：团队对话 */}
       <section className="flex-1 min-w-0 flex flex-col gap-4">
-        <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+        <div className="flex-1 min-h-0 space-y-4 overflow-y-auto pr-1">
           {state.cards.map((c) =>
             c.agent === "user" ? (
               <UserBubble key={c.key} text={c.text || ""} />

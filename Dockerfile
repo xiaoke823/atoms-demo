@@ -36,8 +36,10 @@ RUN groupadd -r atomix && useradd -r -g atomix atomix
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-# 兜底：file tracing 对原生模块的 .node 二进制偶发漏拷，显式带上
+# 兜底：file tracing 对原生模块的 .node 二进制偶发漏拷，显式带上；
+# jsdom 在 worker 线程中以运行时 require 加载（smoke.ts），静态追踪不可见，必须显式带上
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=builder /app/node_modules/jsdom ./node_modules/jsdom
 
 RUN mkdir -p /app/data && chown -R atomix:atomix /app
 USER atomix

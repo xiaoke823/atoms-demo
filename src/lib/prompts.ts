@@ -36,6 +36,24 @@ export const ITERATE_PATCH_SYSTEM = `你是前端工程师。输入包含【当�
 
 export const JSON_RETRY_ADDON = `你上次输出不是合法 JSON。重新输出，只输出 JSON 对象本身，不要任何其他文字。`;
 
+export const ITERATE_FULL_SYSTEM = `你是前端工程师。输入包含【当前应用完整HTML】【用户反馈的问题】【运行时报错清单】。
+修复全部问题后输出完整单文件 HTML。规则:
+1. 只输出一个 \`\`\`html 围栏,围栏外不要任何文字
+2. 优先根据运行时报错定位根因(通常是元素不存在/初始化顺序/空引用),对症修复
+3. Tailwind CSS CDN;数据继续用 localStorage 且字段兼容(不丢用户已有数据结构)
+4. 文案中文;完整可运行;除修复必要外不要改动无关代码`;
+
+export function iterateFullUser(html: string, message: string, errors: string[]): ChatMessage[] {
+  return [
+    {
+      role: "user",
+      content: `【当前应用完整HTML】\n\`\`\`html\n${html}\n\`\`\`\n【用户反馈的问题】\n${message}\n【运行时报错清单】\n${
+        errors.length ? errors.map((e, i) => `${i + 1}. ${e}`).join("\n") : "（无——按用户描述的问题排查）"
+      }\n\n请输出修复后的完整 HTML。`,
+    },
+  ];
+}
+
 export function pmUser(idea: string): ChatMessage[] {
   return [{ role: "user", content: `用户的应用想法：${idea}` }];
 }

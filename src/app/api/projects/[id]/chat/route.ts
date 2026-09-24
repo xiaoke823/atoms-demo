@@ -3,11 +3,12 @@
 // ③ 120s 总时限 + 客户端取消时不落库
 import { getUserFromRequest } from "@/lib/auth";
 import { getDb, deductCredits, grantCredits } from "@/lib/db";
-import { chat } from "@/lib/llm";
+import { chat, chatStream } from "@/lib/llm";
 import * as P from "@/lib/prompts";
-import { extractJson } from "@/lib/extract";
+import { extractJson, extractHtml } from "@/lib/extract";
 import { runRuleChecks } from "@/lib/qa";
 import { applyPatch } from "@/lib/patch";
+import { smokeTest } from "@/lib/smoke";
 import { sseFrame, SSE_PING } from "@/lib/sse";
 import { checkRate, clearRate } from "@/lib/ratelimit";
 import type { SSEEvent } from "@/lib/types";
@@ -102,61 +103,95 @@ export async function POST(
           );
           const j = extractJson(patchText);
           const result = applyPatch(project.html as string, j.ok ? j.data : null);
-          if (!result.applied.length) {
-            throw new Error(
-              "未能生成可应用的修改：请把需求描述得更具体一些（指明要修改的按钮、文案或颜色等）"
-            );
-          }
-          send({
-            type: "delta",
-            agent: "engineer",
-            text: `已应用 ${result.applied.length} 处修改${
-              result.skipped.length ? `（另有 ${result.skipped.length} 处未能精确匹配，已忽略）` : ""
-            }`,
-            status: true,
-          });
 
-          // ── QA：规则复检。不过 → 不落库、回滚预览到上一版 ──
-          send({ type: "stage_start", agent: "qa" });
-          const issues = runRuleChecks(result.html);
-          send({
-            type: "stage_done",
-            agent: "qa",
-            artifact: { passed: issues.length === 0, issues },
-          });
-          if (issues.length) {
-            // 回滚：库里本就是上一版(未写入)，把前端预览也刷回去
-            send({ type: "preview", html: project.html as string });
+          // ── 冒烟:patch 后真实执行一遍 ──
+          let finalHtml: string | null = null;
+          let smokeErrors: string[] = [];
+          if (result.applied.length) {
+            send({ type: "stage_start", agent: "qa" });
+            send({ type: "delta", agent: "qa", text: "运行冒烟测试…", status: true });
+            const smoke = await smokeTest(result.html);
+            smokeErrors = smoke.errors;
+            send({
+              type: "stage_done",
+              agent: "qa",
+              artifact: {
+                passed: smoke.ok && runRuleChecks(result.html).length === 0,
+                issues: smokeErrors,
+              },
+            });
+            if (smoke.ok) finalHtml = result.html;
+          }
+
+          // ── patch 不适用/冒烟失败 → 带报错整体修复(关思考,安全时限内全量重写) ──
+          if (!finalHtml) {
+            send({ type: "stage_start", agent: "engineer", note: "iterate" });
             send({
               type: "delta",
-              agent: "qa",
-              text: "质检未通过，已回滚到上一版本",
+              agent: "engineer",
+              text: result.applied.length
+                ? "局部修改后仍有运行错误，带上报错整体修复…"
+                : "该需求不适合局部替换，正在整体修改…",
               status: true,
             });
-            throw new Error(
-              `修改未通过质检（${issues.length} 个问题），已保留上一版本`
+            const fullRaw = await chatStream(
+              [
+                { role: "system", content: P.ITERATE_FULL_SYSTEM },
+                ...P.iterateFullUser(project.html as string, message, smokeErrors),
+              ],
+              (d) => send({ type: "delta", agent: "engineer", text: d }),
+              { temperature: 0.3, deadlineMs: 120_000, disableThinking: true }
             );
+            const fixed = extractHtml(fullRaw);
+            if (!fixed) throw new Error("整体修改未能产出有效 HTML");
+
+            send({ type: "stage_start", agent: "qa" });
+            send({ type: "delta", agent: "qa", text: "对整体修改运行冒烟测试…", status: true });
+            const reSmoke = await smokeTest(fixed);
+            send({
+              type: "stage_done",
+              agent: "qa",
+              artifact: { passed: reSmoke.ok, issues: reSmoke.errors },
+            });
+            if (!reSmoke.ok) {
+              send({ type: "preview", html: project.html as string });
+              send({
+                type: "delta",
+                agent: "qa",
+                text: "修复后仍有运行错误，已回滚到上一版本",
+                status: true,
+              });
+              throw new Error(
+                `整体修复后仍报错（${reSmoke.errors[0] || "未知"}），已保留上一版本`
+              );
+            }
+            finalHtml = fixed;
+          }
+
+          if (runRuleChecks(finalHtml).length) {
+            send({ type: "preview", html: project.html as string });
+            throw new Error("修改未通过静态质检，已保留上一版本");
           }
 
           // 用户已取消：不再落库(此前推送的内容仅停留在其本地预览)
           if (closed) return;
 
-          send({ type: "preview", html: result.html });
+          send({ type: "preview", html: finalHtml });
           send({
             type: "stage_done",
             agent: "engineer",
-            artifact: { size: result.html.length },
+            artifact: { size: finalHtml.length },
           });
 
           // ── 落库 ──
           db.prepare(
             "UPDATE projects SET html = ?, updated_at = datetime('now') WHERE id = ?"
-          ).run(result.html, pid);
+          ).run(finalHtml, pid);
           const ins = db.prepare(
             "INSERT INTO messages (project_id, role, content) VALUES (?, ?, ?)"
           );
           ins.run(pid, "user", message);
-          ins.run(pid, "engineer", result.html);
+          ins.run(pid, "engineer", finalHtml);
 
           charged = false;
           const credits = (
