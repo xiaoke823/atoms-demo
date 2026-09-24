@@ -165,6 +165,20 @@ describe("chatStream", () => {
 });
 
 describe("chat", () => {
+  it("disableThinking 时请求体携带 thinking.disabled(迭代提速)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: "OK" } }] }, 200)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const out = chat([{ role: "user", content: "hi" }], { disableThinking: true });
+    await vi.advanceTimersByTimeAsync(0);
+    await out;
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("deadlineMs 为总预算:挂起的请求在期限内被中断,不再重试", async () => {
     vi.stubGlobal(
       "fetch",

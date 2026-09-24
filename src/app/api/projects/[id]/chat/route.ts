@@ -92,7 +92,13 @@ export async function POST(
               { role: "system", content: P.ITERATE_PATCH_SYSTEM },
               ...P.iteratePatchUser(project.html as string, message),
             ],
-            { temperature: 0.2, maxTokens: 4096, deadlineMs: 120_000 }
+            {
+              temperature: 0.2,
+              maxTokens: 4096,
+              deadlineMs: 120_000,
+              // 精确小修改不需要推理:关掉思考阶段,延迟大幅下降
+              disableThinking: true,
+            }
           );
           const j = extractJson(patchText);
           const result = applyPatch(project.html as string, j.ok ? j.data : null);

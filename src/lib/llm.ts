@@ -10,6 +10,8 @@ interface LlmOpts {
   maxTokens?: number;
   /** 整次调用(含重试)的总时限,毫秒。到期 abort 并抛错,杜绝无限挂起 */
   deadlineMs?: number;
+  /** 关闭推理模型的思考阶段(精确小任务用它:大幅降低延迟,输出不受影响) */
+  disableThinking?: boolean;
 }
 
 function cfg() {
@@ -41,6 +43,7 @@ async function postChat(
       stream,
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? 16384,
+      ...(opts.disableThinking ? { thinking: { type: "disabled" } } : {}),
     }),
     // 流式由调用方的空闲看门狗控制；非流式默认 120s 总超时(调用方可传更短的 deadline)
     signal: stream ? signal : (signal ?? AbortSignal.timeout(120_000)),
