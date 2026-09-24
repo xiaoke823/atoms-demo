@@ -83,11 +83,8 @@ function ArtifactView({ agent, artifact }: { agent: string; artifact: any }) {
   }
 
   if (agent === "engineer") {
-    const size = artifact.size ?? 0;
     return (
-      <div className="mt-1 text-sm text-slate-500">
-        代码生成完成 · {(size / 1024).toFixed(1)} KB
-      </div>
+      <div className="mt-1 text-sm text-slate-500">代码生成完成</div>
     );
   }
 
