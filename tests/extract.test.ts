@@ -38,6 +38,15 @@ describe("extractHtml", () => {
   it("无 HTML 返回 null", () => {
     expect(extractHtml("抱歉我无法完成")).toBeNull();
   });
+
+  it("截断(未闭合围栏)时兜底提取围栏后已有内容", () => {
+    // max_tokens 耗尽时模型输出到一半戛然而止,围栏未闭合
+    const truncated = `\`\`\`html\n<!DOCTYPE html><html><body><h1>Hi</h1>`;
+    const r = extractHtml(truncated);
+    expect(r).not.toBeNull();
+    expect(r).toContain("<!DOCTYPE html>");
+    expect(r).toContain("<h1>Hi</h1>");
+  });
 });
 
 describe("QA 规则引擎", () => {

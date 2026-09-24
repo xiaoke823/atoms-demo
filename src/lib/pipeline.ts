@@ -36,7 +36,7 @@ export async function callJson(
   const first = await chatStream(
     [{ role: "system", content: system }, ...messages],
     (d) => send({ type: "delta", agent, text: d }),
-    { temperature: 0.3, maxTokens: 4096 }
+    { temperature: 0.3, maxTokens: 4096, disableThinking: true }
   );
   let j = extractJson(first);
   if (j.ok) return { data: j.data, text: first };
@@ -49,7 +49,7 @@ export async function callJson(
       { role: "user", content: P.JSON_RETRY_ADDON },
     ],
     (d) => send({ type: "delta", agent, text: d }),
-    { temperature: 0, maxTokens: 4096 }
+    { temperature: 0, maxTokens: 4096, disableThinking: true }
   );
   j = extractJson(second);
   return j.ok ? { data: j.data, text: second } : { data: null, text: second };
@@ -113,7 +113,7 @@ export async function runGeneration(
   const raw = await chatStream(
     [{ role: "system", content: P.ENGINEER_SYSTEM }, ...P.engineerUser(idea, pm.data ?? pmData, archData)],
     (d) => send({ type: "delta", agent: "engineer", text: d }),
-    { temperature: 0.5 }
+    { temperature: 0.5, disableThinking: true }
   );
   const html = extractHtml(raw);
   if (!html) throw new Error("工程师输出中未找到有效 HTML，请重试");
@@ -127,7 +127,7 @@ export async function runGeneration(
     send({ type: "delta", agent: "qa", text: "静态规则通过，进行语义审查…", status: true });
     const qaText = await chat(
       [{ role: "system", content: P.QA_SYSTEM }, ...P.qaUser(idea, pmData.features, html)],
-      { temperature: 0, maxTokens: 2048 }
+      { temperature: 0, maxTokens: 2048, disableThinking: true }
     );
     const qj = extractJson(qaText);
     if (qj.ok && qj.data?.passed === false && Array.isArray(qj.data.issues)) {
@@ -150,7 +150,7 @@ export async function runGeneration(
       const fixRaw = await chatStream(
         [{ role: "system", content: P.ENGINEER_SYSTEM }, ...P.repairUser(issues, html)],
         () => {},
-        { temperature: 0.3 }
+        { temperature: 0.3, disableThinking: true }
       );
       const fixed = extractHtml(fixRaw);
       if (fixed) {
