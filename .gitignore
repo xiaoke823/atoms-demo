@@ -48,3 +48,6 @@ next-env.d.ts
 sse*.txt
 tok.txt
 preview*.html
+
+# 镜像导出产物(部署走 ACR,不进仓库)
+*.tar.gz
